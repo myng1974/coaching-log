@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Coaching Log — Offline Starter App</title>
+<!--
+  HOW THIS FILE WORKS (the 3 parts of a web app):
+  1. HTML below = the layout (the form and the list you see).
+  2. CSS in <style> = the looks (colors, spacing, big tap targets).
+  3. JavaScript in <script> = the brains (saving to the phone, listing, deleting).
+  Everything is saved on THIS device only, in localStorage. No internet,
+  no account, no server. Open this file in any browser and it works.
+  To put it on your home screen: iPhone -> Share -> Add to Home Screen.
+  Android -> menu (three dots) -> Add to Home screen.
+  VIBE-CODE IDEAS (try asking for one of these next):
+  - "Add a notes field to each session"
+  - "Show how many sessions I coached this week"
+  - "Add a search box to find sessions by facility"
+-->
+<style>
+  /* ---------- CSS: the looks ---------- */
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    margin: 0; padding: 16px; background: #f2f5f0; color: #1d2b1d;
+  }
+  main { max-width: 520px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 4px 0 2px; }
+  p.sub { color: #5a6b5a; margin: 0 0 16px; }
+  form, .card {
+    background: #fff; border-radius: 14px; padding: 16px;
+    box-shadow: 0 1px 4px rgba(0,0,0,.08); margin-bottom: 16px;
+  }
+  label { display: block; font-size: .85rem; font-weight: 600; margin: 12px 0 4px; }
+  label:first-child { margin-top: 0; }
+  input {
+    width: 100%; padding: 12px; font-size: 1rem;
+    border: 1px solid #c9d4c9; border-radius: 10px;
+  }
+  .row { display: flex; gap: 10px; }
+  .row > div { flex: 1; }
+  button {
+    width: 100%; padding: 14px; margin-top: 16px; font-size: 1rem; font-weight: 700;
+    color: #fff; background: #2e7d32; border: 0; border-radius: 10px; cursor: pointer;
+  }
+  button:active { background: #1b5e20; }
+  .session {
+    display: flex; justify-content: space-between; align-items: center; gap: 10px;
+    padding: 12px 0; border-bottom: 1px solid #e8ece8;
+  }
+  .session:last-child { border-bottom: 0; }
+  .session strong { display: block; }
+  .session span { color: #5a6b5a; font-size: .9rem; }
+  .session button {
+    width: auto; margin: 0; padding: 8px 12px; background: #fff;
+    color: #b3261e; border: 1px solid #e0b4b0; font-weight: 600;
+  }
+  .empty { color: #5a6b5a; text-align: center; padding: 8px 0; }
+  .tip { font-size: .85rem; color: #5a6b5a; line-height: 1.5; }
+</style>
+</head>
+<body>
+<main>
+  <!-- ---------- HTML: the layout ---------- -->
+  <h1>🏓 Coaching Log</h1>
+  <p class="sub">Offline starter app — saved only on this device.</p>
+
+  <form id="logForm">
+    <label for="date">Date</label>
+    <input id="date" type="date" required>
+
+    <label for="facility">Facility</label>
+    <input id="facility" type="text" placeholder="e.g. BJK" required>
+
+    <div class="row">
+      <div>
+        <label for="start">Start time</label>
+        <input id="start" type="time" value="10:00" required>
+      </div>
+      <div>
+        <label for="end">End time</label>
+        <input id="end" type="time" value="12:00" required>
+      </div>
+    </div>
+
+    <label for="className">Class/Client(s)</label>
+    <input id="className" type="text" placeholder="e.g. 102 and OP" required>
+
+    <button type="submit">Add session</button>
+  </form>
+
+  <div class="card">
+    <strong id="count">No sessions yet</strong>
+    <div id="list"><p class="empty">Your sessions will show up here.<br>Try adding your first one above.</p></div>
+  </div>
+
+  <p class="tip">💡 Tip: on iPhone, tap Share → Add to Home Screen. On Android, tap the menu → Add to Home screen. Then it opens like a real app — and it still works with no internet.</p>
+</main>
+
+<script>
+  // ---------- JavaScript: the brains ----------
+  // All sessions live in the browser's localStorage under this key.
+  var KEY = "coachingSessions";
+
+  function loadSessions() {
+    try { return JSON.parse(localStorage.getItem(KEY)) || []; }
+    catch (e) { return []; }
+  }
+  function saveSessions(sessions) {
+    localStorage.setItem(KEY, JSON.stringify(sessions));
+  }
+  function showTime(t) {
+    // "10:00" -> "10:00 AM" for display
+    var parts = t.split(":"), h = parseInt(parts[0], 10);
+    var suffix = h >= 12 ? "PM" : "AM";
+    var h12 = h % 12 === 0 ? 12 : h % 12;
+    return h12 + ":" + parts[1] + " " + suffix;
+  }
+  function render() {
+    var sessions = loadSessions();
+    var list = document.getElementById("list");
+    var count = document.getElementById("count");
+    count.textContent = sessions.length === 0 ? "No sessions yet"
+      : sessions.length + (sessions.length === 1 ? " session logged" : " sessions logged");
+    if (sessions.length === 0) {
+      list.innerHTML = '<p class="empty">Your sessions will show up here.<br>Try adding your first one above.</p>';
+      return;
+    }
+    list.innerHTML = "";
+    sessions.forEach(function (s, i) {
+      var div = document.createElement("div");
+      div.className = "session";
+      var info = document.createElement("div");
+      var title = document.createElement("strong");
+      title.textContent = s.date + " · " + s.facility;
+      var detail = document.createElement("span");
+      detail.textContent = showTime(s.start) + "–" + showTime(s.end) + " · Class/Client(s) " + s.className;
+      info.appendChild(title); info.appendChild(detail);
+      var del = document.createElement("button");
+      del.type = "button"; del.textContent = "Delete";
+      del.onclick = function () {
+        var updated = loadSessions().filter(function (_, j) { return j !== i; });
+        saveSessions(updated); render();
+      };
+      div.appendChild(info); div.appendChild(del);
+      list.appendChild(div);
+    });
+  }
+  document.getElementById("logForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var sessions = loadSessions();
+    sessions.unshift({
+      date: document.getElementById("date").value,
+      facility: document.getElementById("facility").value.trim(),
+      start: document.getElementById("start").value,
+      end: document.getElementById("end").value,
+      className: document.getElementById("className").value.trim()
+    });
+    saveSessions(sessions);
+    e.target.reset();
+    document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+    document.getElementById("start").value = "10:00";
+    document.getElementById("end").value = "12:00";
+    render();
+  });
+  // Default the date picker to today, then show any saved sessions.
+  document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+  render();
+</script>
+</body>
+</html>
