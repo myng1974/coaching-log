@@ -105,7 +105,7 @@
   </div>
 
   <div class="card">
-    <strong>Export sessions</strong>
+    <strong>Export / import sessions</strong>
     <p class="tip" style="margin:6px 0 0">Pick a date range and export to a CSV file — it opens in Excel and imports into any database. Leave a date blank for no limit on that end.</p>
     <div class="row">
       <div>
@@ -119,6 +119,10 @@
     </div>
     <button type="button" id="exportBtn">Export CSV</button>
     <p class="tip" id="exportMsg"></p>
+    <p class="tip" style="margin:12px 0 0">Bringing sessions in works the other way too — import a CSV file in the same format (for example, one this app exported) and those sessions are added to this copy. Duplicates are skipped, so importing the same file twice is harmless.</p>
+    <button type="button" id="importBtn" class="secondary">Import CSV</button>
+    <input type="file" id="importFile" accept=".csv,text/csv" style="display:none">
+    <p class="tip" id="importMsg"></p>
   </div>
 
   <p class="tip">💡 Tip: on iPhone, tap Share → Add to Home Screen. On Android, tap the menu → Add to Home screen. Then it opens like a real app — and it still works with no internet.</p>
@@ -284,6 +288,110 @@
     }
     msg.textContent = "Exported " + rows.length + (rows.length === 1 ? " session." : " sessions.");
   });
+
+  // ---------- Import (CSV, same format as the export) ----------
+  // Reads a CSV file and merges its sessions into this copy. Tolerant of
+  // spreadsheet edits: a header row in any order, dates written as
+  // 11/2/2026, and times written as "10:00 AM" all get converted.
+  function parseCSV(text) {
+    var rows = [], row = [], field = "", inQuotes = false;
+    text = String(text).replace(/^\uFEFF/, ""); // strip Excel's BOM mark
+    for (var i = 0; i < text.length; i++) {
+      var c = text[i];
+      if (inQuotes) {
+        if (c === '"') {
+          if (text[i + 1] === '"') { field += '"'; i++; }
+          else inQuotes = false;
+        } else field += c;
+      } else if (c === '"') {
+        inQuotes = true;
+      } else if (c === ",") {
+        row.push(field); field = "";
+      } else if (c === "\n" || c === "\r") {
+        if (c === "\r" && text[i + 1] === "\n") i++;
+        row.push(field); field = "";
+        rows.push(row); row = [];
+      } else field += c;
+    }
+    if (field !== "" || row.length) { row.push(field); rows.push(row); }
+    return rows.filter(function (r) { return r.length > 1 || r[0].trim() !== ""; });
+  }
+  function normalizeDate(v) {
+    v = String(v || "").trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
+    var m = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return m[3] + "-" + ("0" + m[1]).slice(-2) + "-" + ("0" + m[2]).slice(-2);
+    return null;
+  }
+  function normalizeTime(v) {
+    var m = String(v || "").trim().toUpperCase().match(/^(\d{1,2}):(\d{2})\s*(AM|PM)?$/);
+    if (!m) return null;
+    var h = parseInt(m[1], 10);
+    if (m[3] === "PM" && h < 12) h += 12;
+    if (m[3] === "AM" && h === 12) h = 0;
+    if (h > 23) return null;
+    return ("0" + h).slice(-2) + ":" + m[2];
+  }
+  document.getElementById("importBtn").addEventListener("click", function () {
+    document.getElementById("importFile").click();
+  });
+  document.getElementById("importFile").addEventListener("change", function () {
+    var file = this.files && this.files[0];
+    this.value = ""; // so picking the same file again still counts as a change
+    if (!file) return;
+    var reader = new FileReader();
+    reader.onload = function () { importCSV(String(reader.result || "")); };
+    reader.readAsText(file);
+  });
+  function importCSV(text) {
+    var rows = parseCSV(text);
+    var col = { date: 0, facility: 1, start: 2, end: 3, className: 4 };
+    var startRow = 0;
+    if (rows.length) {
+      var head = rows[0].map(function (h) { return h.trim().toLowerCase(); });
+      if (head.indexOf("date") >= 0) {
+        startRow = 1;
+        head.forEach(function (h, i) {
+          if (h === "date") col.date = i;
+          else if (h === "facility") col.facility = i;
+          else if (h === "start") col.start = i;
+          else if (h === "end") col.end = i;
+          else if (h.indexOf("class") >= 0 || h.indexOf("client") >= 0) col.className = i;
+        });
+      }
+    }
+    var sessions = loadSessions();
+    var seen = {};
+    sessions.forEach(function (s) {
+      seen[[s.date, s.facility, s.start, s.end, s.className].join("|")] = true;
+    });
+    var added = 0, skipped = 0;
+    for (var r = startRow; r < rows.length; r++) {
+      var row = rows[r];
+      var rec = {
+        date: normalizeDate(row[col.date]),
+        facility: String(row[col.facility] || "").trim(),
+        start: normalizeTime(row[col.start]),
+        end: normalizeTime(row[col.end]),
+        className: String(row[col.className] || "").trim()
+      };
+      if (!rec.date || !rec.start || !rec.end) { skipped++; continue; }
+      var key = [rec.date, rec.facility, rec.start, rec.end, rec.className].join("|");
+      if (seen[key]) { skipped++; continue; }
+      seen[key] = true;
+      sessions.push(rec);
+      added++;
+    }
+    // Keep the list newest-first by date, the way new entries land on top.
+    sessions.sort(function (a, b) { return a.date > b.date ? -1 : a.date < b.date ? 1 : 0; });
+    saveSessions(sessions);
+    render();
+    document.getElementById("importMsg").textContent =
+      added === 0 && skipped === 0 ? "No sessions found in that file."
+      : "Imported " + added + (added === 1 ? " session" : " sessions") +
+        (skipped ? " — skipped " + skipped + (skipped === 1 ? " row" : " rows") +
+          " (duplicates or unreadable)." : ".");
+  }
 
   // Default the date picker to today, carry the last session's times
   // forward, then show any saved sessions.
