@@ -273,7 +273,7 @@
     }
     var lines = ["Date,Facility,Start,End,Class/Client(s)"];
     rows.forEach(function (s) {
-      lines.push([s.date, s.facility, s.start, s.end, s.className].map(csvCell).join(","));
+      lines.push([s.date, s.facility, showTime(s.start), showTime(s.end), s.className].map(csvCell).join(","));
     });
     var name = "coaching-log" + (from ? "-" + from : "") + (to ? "_to_" + to : "") + ".csv";
     var file = new File([lines.join("\r\n")], name, { type: "text/csv" });
