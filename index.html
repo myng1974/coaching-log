@@ -10,7 +10,8 @@
   HOW THIS FILE WORKS (the 3 parts of a web app):
   1. HTML below = the layout (the form and the list you see).
   2. CSS in <style> = the looks (colors, spacing, big tap targets).
-  3. JavaScript in <script> = the brains (saving to the phone, listing, deleting).
+  3. JavaScript in <script> = the brains (saving to the phone, listing,
+     editing, deleting, and exporting sessions to a CSV file).
   Everything is saved on THIS device only, in localStorage. No internet,
   no account, no server. Open this file in any browser and it works.
   To put it on your home screen: iPhone -> Share -> Add to Home Screen.
@@ -58,6 +59,11 @@
     width: auto; margin: 0; padding: 8px 12px; background: #fff;
     color: #b3261e; border: 1px solid #e0b4b0; font-weight: 600;
   }
+  .session button.edit { color: #2e7d32; border-color: #a5c4a7; }
+  .session .actions { display: flex; gap: 8px; }
+  .secondary {
+    background: #fff; color: #1d2b1d; border: 1px solid #c9d4c9; font-weight: 600;
+  }
   .empty { color: #5a6b5a; text-align: center; padding: 8px 0; }
   .tip { font-size: .85rem; color: #5a6b5a; line-height: 1.5; }
 </style>
@@ -89,12 +95,30 @@
     <label for="className">Class/Client(s)</label>
     <input id="className" type="text" placeholder="e.g. 102 and OP" required>
 
-    <button type="submit">Add session</button>
+    <button type="submit" id="saveBtn">Add session</button>
+    <button type="button" id="cancelEdit" class="secondary" style="display:none">Cancel edit</button>
   </form>
 
   <div class="card">
     <strong id="count">No sessions yet</strong>
     <div id="list"><p class="empty">Your sessions will show up here.<br>Try adding your first one above.</p></div>
+  </div>
+
+  <div class="card">
+    <strong>Export sessions</strong>
+    <p class="tip" style="margin:6px 0 0">Pick a date range and export to a CSV file — it opens in Excel and imports into any database. Leave a date blank for no limit on that end.</p>
+    <div class="row">
+      <div>
+        <label for="fromDate">From</label>
+        <input id="fromDate" type="date">
+      </div>
+      <div>
+        <label for="toDate">To</label>
+        <input id="toDate" type="date">
+      </div>
+    </div>
+    <button type="button" id="exportBtn">Export CSV</button>
+    <p class="tip" id="exportMsg"></p>
   </div>
 
   <p class="tip">💡 Tip: on iPhone, tap Share → Add to Home Screen. On Android, tap the menu → Add to Home screen. Then it opens like a real app — and it still works with no internet.</p>
@@ -139,35 +163,132 @@
       var detail = document.createElement("span");
       detail.textContent = showTime(s.start) + "–" + showTime(s.end) + " · Class/Client(s) " + s.className;
       info.appendChild(title); info.appendChild(detail);
+      var actions = document.createElement("div");
+      actions.className = "actions";
+      var edit = document.createElement("button");
+      edit.type = "button"; edit.textContent = "Edit"; edit.className = "edit";
+      edit.onclick = function () { startEdit(i); };
       var del = document.createElement("button");
       del.type = "button"; del.textContent = "Delete";
       del.onclick = function () {
+        if (editing >= 0) cancelEdit();
         var updated = loadSessions().filter(function (_, j) { return j !== i; });
         saveSessions(updated); render();
       };
-      div.appendChild(info); div.appendChild(del);
+      actions.appendChild(edit); actions.appendChild(del);
+      div.appendChild(info); div.appendChild(actions);
       list.appendChild(div);
     });
   }
+  // ---------- Editing ----------
+  // editing = which list position is loaded in the form, or -1 when the
+  // form is adding a brand-new session.
+  var editing = -1;
+  function setEditMode(on) {
+    document.getElementById("saveBtn").textContent = on ? "Save changes" : "Add session";
+    document.getElementById("cancelEdit").style.display = on ? "" : "none";
+  }
+  function startEdit(i) {
+    var s = loadSessions()[i];
+    if (!s) return;
+    editing = i;
+    document.getElementById("date").value = s.date;
+    document.getElementById("facility").value = s.facility;
+    document.getElementById("start").value = s.start;
+    document.getElementById("end").value = s.end;
+    document.getElementById("className").value = s.className;
+    setEditMode(true);
+    document.getElementById("logForm").scrollIntoView();
+  }
+  function cancelEdit() {
+    editing = -1;
+    setEditMode(false);
+    resetForm();
+  }
+  document.getElementById("cancelEdit").addEventListener("click", cancelEdit);
+
+  // ---------- Carry the times forward ----------
+  // New entries start with the times from the most recent session, so a
+  // regular class only needs its date and name typed in.
+  function carryTimes() {
+    var sessions = loadSessions();
+    if (sessions.length) {
+      document.getElementById("start").value = sessions[0].start;
+      document.getElementById("end").value = sessions[0].end;
+    }
+  }
+  function resetForm() {
+    document.getElementById("logForm").reset();
+    document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+    carryTimes();
+  }
+
   document.getElementById("logForm").addEventListener("submit", function (e) {
     e.preventDefault();
-    var sessions = loadSessions();
-    sessions.unshift({
+    var record = {
       date: document.getElementById("date").value,
       facility: document.getElementById("facility").value.trim(),
       start: document.getElementById("start").value,
       end: document.getElementById("end").value,
       className: document.getElementById("className").value.trim()
-    });
+    };
+    var sessions = loadSessions();
+    if (editing >= 0 && sessions[editing]) {
+      sessions[editing] = record; // save changes to the existing entry
+    } else {
+      sessions.unshift(record);   // newest session goes on top
+    }
     saveSessions(sessions);
-    e.target.reset();
-    document.getElementById("date").value = new Date().toISOString().slice(0, 10);
-    document.getElementById("start").value = "10:00";
-    document.getElementById("end").value = "12:00";
+    editing = -1;
+    setEditMode(false);
+    resetForm();
+    // The session just saved becomes the one the times carry forward from.
+    document.getElementById("start").value = record.start;
+    document.getElementById("end").value = record.end;
     render();
   });
-  // Default the date picker to today, then show any saved sessions.
+
+  // ---------- Export (CSV, by date range) ----------
+  // CSV is the file every database and spreadsheet imports: one session
+  // per row, oldest first. On phones the share sheet appears so the file
+  // can be saved to Files; on a computer it downloads.
+  function csvCell(v) {
+    v = String(v == null ? "" : v);
+    return /[",\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+  }
+  document.getElementById("exportBtn").addEventListener("click", function () {
+    var from = document.getElementById("fromDate").value;
+    var to = document.getElementById("toDate").value;
+    var rows = loadSessions().filter(function (s) {
+      return (!from || s.date >= from) && (!to || s.date <= to);
+    }).sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+    var msg = document.getElementById("exportMsg");
+    if (rows.length === 0) {
+      msg.textContent = "No sessions in that date range.";
+      return;
+    }
+    var lines = ["Date,Facility,Start,End,Class/Client(s)"];
+    rows.forEach(function (s) {
+      lines.push([s.date, s.facility, s.start, s.end, s.className].map(csvCell).join(","));
+    });
+    var name = "coaching-log" + (from ? "-" + from : "") + (to ? "_to_" + to : "") + ".csv";
+    var file = new File([lines.join("\r\n")], name, { type: "text/csv" });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      navigator.share({ files: [file] }).catch(function () {});
+    } else {
+      var url = URL.createObjectURL(file);
+      var a = document.createElement("a");
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+    }
+    msg.textContent = "Exported " + rows.length + (rows.length === 1 ? " session." : " sessions.");
+  });
+
+  // Default the date picker to today, carry the last session's times
+  // forward, then show any saved sessions.
   document.getElementById("date").value = new Date().toISOString().slice(0, 10);
+  carryTimes();
   render();
 </script>
 </body>
